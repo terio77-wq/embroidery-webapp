@@ -42,6 +42,17 @@
   .thread-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px;}
   .thread-swatch{display:flex;align-items:center;gap:6px;background:#f0f6ff;border:1.5px solid var(--border);border-radius:6px;padding:4px 8px;font-size:.72rem;}
   .thread-swatch .dot{width:14px;height:14px;border-radius:3px;border:1px solid rgba(0,0,0,.15);flex-shrink:0;}
+  select{width:100%;background:#f0f6ff;color:var(--text);border:1.5px solid var(--border);border-radius:6px;padding:7px 8px;font-size:.85rem;}
+  .parts-list{display:flex;flex-direction:column;gap:6px;max-height:260px;overflow-y:auto;}
+  .part-row{display:flex;align-items:center;gap:6px;background:#f0f6ff;border:1.5px solid var(--border);border-radius:6px;padding:5px 7px;}
+  .part-row .dot{width:14px;height:14px;border-radius:3px;border:1px solid rgba(0,0,0,.15);flex-shrink:0;}
+  .part-row .info{font-size:.68rem;color:var(--muted);width:52px;flex-shrink:0;}
+  .part-row select{padding:4px 5px;font-size:.72rem;flex:1;}
+  .compare-row{display:flex;align-items:center;gap:8px;font-size:.82rem;}
+  .compare-row input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px;}
+  .slider-row{display:flex;align-items:center;gap:8px;margin-top:8px;}
+  .slider-row input[type=range]{flex:1;accent-color:var(--blue);}
+  .slider-val{font-size:.75rem;color:var(--muted);width:36px;text-align:right;}
   .canvas-area{display:flex;flex-direction:column;overflow:hidden;}
   .canvas-toolbar{display:flex;align-items:center;gap:6px;background:var(--panel);border-bottom:1px solid var(--border);padding:6px 14px;flex-shrink:0;}
   .ctrl-btn{background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--header);font-size:.8rem;padding:4px 10px;cursor:pointer;height:26px;display:flex;align-items:center;gap:3px;white-space:nowrap;font-weight:600;transition:background .15s;}
@@ -79,6 +90,15 @@
         <label class="field-label">刺しゅう枠サイズ (mm・正方形)</label>
         <input type="number" id="hoop-mm" value="100" min="10" max="400" step="1">
       </div>
+      <div class="field">
+        <label class="field-label">回転</label>
+        <select id="rotation-deg">
+          <option value="0">0°（そのまま）</option>
+          <option value="90">90°</option>
+          <option value="180">180°</option>
+          <option value="270">270°</option>
+        </select>
+      </div>
       <button class="btn-process" id="btn-generate" disabled>刺しゅうデータを生成</button>
       <div id="status-msg"></div>
     </div>
@@ -96,6 +116,20 @@
     <div class="panel" id="threads-panel" style="display:none;">
       <h2>使用糸色（実機スナップ後）</h2>
       <div class="thread-list" id="thread-list"></div>
+    </div>
+
+    <div class="panel" id="parts-panel" style="display:none;">
+      <h2>パーツ別の縫い方</h2>
+      <div class="parts-list" id="parts-list"></div>
+    </div>
+
+    <div class="panel" id="compare-panel" style="display:none;">
+      <h2>元画像と比較</h2>
+      <label class="compare-row"><input type="checkbox" id="compare-toggle">元画像を下に表示</label>
+      <div class="slider-row">
+        <input type="range" id="compare-opacity" min="0" max="100" value="60">
+        <span class="slider-val" id="compare-opacity-val">60%</span>
+      </div>
     </div>
 
     <div class="panel" id="download-panel" style="display:none;">
@@ -126,14 +160,21 @@ const fileInput = document.getElementById('file-input');
 const btnGenerate = document.getElementById('btn-generate');
 const statusMsg = document.getElementById('status-msg');
 const hoopInput = document.getElementById('hoop-mm');
+const rotationSelect = document.getElementById('rotation-deg');
 const canvas = document.getElementById('stitch-canvas');
 const canvasWrap = document.getElementById('canvas-wrap');
 const placeholderMsg = document.getElementById('placeholder-msg');
 const ctx = canvas.getContext('2d');
+const compareToggle = document.getElementById('compare-toggle');
+const compareOpacity = document.getElementById('compare-opacity');
+const compareOpacityVal = document.getElementById('compare-opacity-val');
 
 let selectedFile = null;
-let currentResult = null; // {stats, threads, strokes, hoop_mm, token}
+let currentResult = null; // {stats, threads, strokes, hoop_mm, token, parts_list}
+let originalImg = null;
 let view = { scale: 4, offsetX: 0, offsetY: 0 }; // px per mm, pan offset in canvas px
+
+const STITCH_TYPE_LABELS = { satin: 'サテン縫い', tatami: 'タタミ縫い', radial: '放射状塗り' };
 
 function setStatus(text, isError) {
   statusMsg.textContent = text || '';
@@ -166,11 +207,14 @@ btnGenerate.addEventListener('click', async () => {
   setStatus('生成中...');
   document.getElementById('stats-panel').style.display = 'none';
   document.getElementById('threads-panel').style.display = 'none';
+  document.getElementById('parts-panel').style.display = 'none';
+  document.getElementById('compare-panel').style.display = 'none';
   document.getElementById('download-panel').style.display = 'none';
 
   const formData = new FormData();
   formData.append('image', selectedFile);
   formData.append('hoop_mm', hoopInput.value);
+  formData.append('rotation_deg', rotationSelect.value);
 
   try {
     const res = await fetch('/api/generate', { method: 'POST', body: formData });
@@ -181,6 +225,8 @@ btnGenerate.addEventListener('click', async () => {
       return;
     }
     currentResult = data;
+    originalImg = null;
+    loadOriginalImage(data.token);
     renderResult(data);
     setStatus('生成完了');
   } catch (err) {
@@ -188,6 +234,12 @@ btnGenerate.addEventListener('click', async () => {
   }
   btnGenerate.disabled = false;
 });
+
+function loadOriginalImage(token) {
+  const img = new Image();
+  img.onload = () => { originalImg = img; draw(); };
+  img.src = '/api/image/' + token;
+}
 
 function renderResult(data) {
   document.getElementById('stat-parts').textContent = data.stats.parts;
@@ -205,12 +257,67 @@ function renderResult(data) {
     threadList.appendChild(el);
   });
   document.getElementById('threads-panel').style.display = 'block';
+
+  renderPartsList(data.parts_list || []);
+  document.getElementById('parts-panel').style.display = 'block';
+  document.getElementById('compare-panel').style.display = 'block';
   document.getElementById('download-panel').style.display = 'block';
 
   placeholderMsg.style.display = 'none';
   resetView();
   draw();
 }
+
+function renderPartsList(parts) {
+  const list = document.getElementById('parts-list');
+  list.innerHTML = '';
+  parts.forEach((p) => {
+    const row = document.createElement('div');
+    row.className = 'part-row';
+    row.innerHTML = `
+      <span class="dot" style="background:${p.hex}"></span>
+      <span class="info">${p.area_mm2}mm²</span>
+      <select data-index="${p.index}">
+        <option value="satin"${p.stitch_type === 'satin' ? ' selected' : ''}>${STITCH_TYPE_LABELS.satin}</option>
+        <option value="tatami"${p.stitch_type === 'tatami' ? ' selected' : ''}>${STITCH_TYPE_LABELS.tatami}</option>
+        <option value="radial"${p.stitch_type === 'radial' ? ' selected' : ''}>${STITCH_TYPE_LABELS.radial}</option>
+      </select>`;
+    const select = row.querySelector('select');
+    select.addEventListener('change', () => updatePartStitchType(p.index, select.value, select));
+    list.appendChild(row);
+  });
+}
+
+async function updatePartStitchType(index, stitchType, selectEl) {
+  if (!currentResult) return;
+  selectEl.disabled = true;
+  setStatus('パーツ' + (index + 1) + 'を再生成中...');
+  try {
+    const res = await fetch(`/api/parts/${currentResult.token}/${index}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stitch_type: stitchType }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setStatus(data.error || '更新に失敗しました', true);
+      selectEl.disabled = false;
+      return;
+    }
+    currentResult = data;
+    renderResult(data);
+    setStatus('更新完了');
+  } catch (err) {
+    setStatus('通信エラー: ' + err.message, true);
+  }
+  selectEl.disabled = false;
+}
+
+compareToggle.addEventListener('change', draw);
+compareOpacity.addEventListener('input', () => {
+  compareOpacityVal.textContent = compareOpacity.value + '%';
+  draw();
+});
 
 document.getElementById('btn-download').addEventListener('click', () => {
   if (!currentResult) return;
@@ -258,6 +365,12 @@ function draw() {
   ctx.setLineDash([2 / view.scale, 2 / view.scale]);
   ctx.strokeRect(-half, -half, currentResult.hoop_mm, currentResult.hoop_mm);
   ctx.setLineDash([]);
+
+  if (compareToggle.checked && originalImg) {
+    // 画像は枠(hoop)にフィットさせて生成しているので、同じ矩形にそのまま描画する
+    ctx.drawImage(originalImg, -half, -half, currentResult.hoop_mm, currentResult.hoop_mm);
+    ctx.globalAlpha = compareOpacity.value / 100;
+  }
 
   currentResult.strokes.forEach(stroke => {
     const t = currentResult.threads[stroke.thread] || { hex: '#333' };
