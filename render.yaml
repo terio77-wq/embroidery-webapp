@@ -3,5 +3,5 @@ services:
     name: embroidery-webapp
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn -w 2 -b 0.0.0.0:$PORT --chdir webapp server:app
+    startCommand: gunicorn -w 1 --timeout 180 -b 0.0.0.0:$PORT --chdir webapp server:app
     plan: free
