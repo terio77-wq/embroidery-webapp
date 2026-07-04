@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>刺しゅうデータ変換 - embroidery_autopunch</title>
+<style>
+  :root{
+    --bg:#f0f6ff;--sidebar:#e4edfa;--panel:#fff;--header:#1e3a72;
+    --border:#b0ccee;--accent:#e94560;--blue:#2563eb;--text:#1a2e4a;--muted:#5a7898;--shadow:rgba(30,58,114,.12);
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Segoe UI','Hiragino Sans',sans-serif;background:var(--bg);color:var(--text);height:100dvh;overflow:hidden;display:flex;flex-direction:column;}
+  header{background:var(--header);color:#fff;padding:10px 20px;display:flex;align-items:center;gap:10px;flex-shrink:0;box-shadow:0 2px 8px var(--shadow);z-index:10;}
+  header h1{font-size:1.2rem;letter-spacing:.5px;}
+  header p{font-size:.72rem;color:rgba(255,255,255,.6);margin-top:1px;}
+  .app-body{flex:1;display:grid;grid-template-columns:280px 1fr;overflow:hidden;}
+  .sidebar{background:var(--sidebar);padding:14px 12px;border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;gap:12px;}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 14px;box-shadow:0 1px 4px var(--shadow);}
+  .panel h2{font-size:.68rem;text-transform:uppercase;letter-spacing:1.2px;color:var(--header);margin-bottom:10px;font-weight:700;}
+  .drop-zone{border:2px dashed var(--border);border-radius:8px;padding:20px 10px;text-align:center;cursor:pointer;transition:background .2s,border-color .2s;background:#f7faff;}
+  .drop-zone:hover,.drop-zone.drag-over{background:#ddeeff;border-color:var(--blue);}
+  .drop-zone svg{opacity:.5;margin-bottom:6px;}
+  .drop-zone p{font-size:.82rem;color:var(--muted);}
+  .drop-zone input{display:none;}
+  .field{margin-bottom:12px;}.field:last-child{margin-bottom:0;}
+  label.field-label{display:block;font-size:.75rem;color:var(--muted);margin-bottom:5px;font-weight:600;}
+  input[type=number]{width:100%;background:#f0f6ff;color:var(--text);border:1.5px solid var(--border);border-radius:6px;padding:7px 8px;font-size:.85rem;}
+  .btn-process{width:100%;padding:11px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer;transition:background .2s,opacity .2s;box-shadow:0 2px 8px rgba(233,69,96,.3);}
+  .btn-process:disabled{opacity:.35;cursor:default;box-shadow:none;}
+  .btn-process:not(:disabled):hover{background:#c73652;}
+  .btn-save{width:100%;padding:9px;background:#fff;color:var(--header);border:1.5px solid var(--border);border-radius:8px;font-size:.88rem;font-weight:600;cursor:pointer;transition:background .2s,border-color .2s;margin-top:6px;}
+  .btn-save:first-child{margin-top:0;}
+  .btn-save:disabled{opacity:.35;cursor:default;}
+  .btn-save:not(:disabled):hover{background:#e8f0fb;border-color:var(--blue);}
+  #status-msg{font-size:.72rem;color:var(--muted);margin-top:6px;min-height:1em;}
+  #status-msg.error{color:var(--accent);font-weight:600;}
+  .stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .stat-box{background:#f0f6ff;border:1.5px solid var(--border);border-radius:8px;padding:8px;text-align:center;}
+  .stat-box .val{font-size:1.3rem;font-weight:700;color:var(--header);}
+  .stat-box .label{font-size:.65rem;color:var(--muted);margin-top:2px;}
+  .thread-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px;}
+  .thread-swatch{display:flex;align-items:center;gap:6px;background:#f0f6ff;border:1.5px solid var(--border);border-radius:6px;padding:4px 8px;font-size:.72rem;}
+  .thread-swatch .dot{width:14px;height:14px;border-radius:3px;border:1px solid rgba(0,0,0,.15);flex-shrink:0;}
+  .canvas-area{display:flex;flex-direction:column;overflow:hidden;}
+  .canvas-toolbar{display:flex;align-items:center;gap:6px;background:var(--panel);border-bottom:1px solid var(--border);padding:6px 14px;flex-shrink:0;}
+  .ctrl-btn{background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--header);font-size:.8rem;padding:4px 10px;cursor:pointer;height:26px;display:flex;align-items:center;gap:3px;white-space:nowrap;font-weight:600;transition:background .15s;}
+  .ctrl-btn:hover{background:#dde8f6;}
+  .ctrl-btn:disabled{opacity:.35;cursor:default;}
+  #zoom-display{font-size:.75rem;color:var(--muted);min-width:44px;text-align:center;}
+  .toolbar-sep{width:1px;height:16px;background:var(--border);margin:0 4px;}
+  .canvas-wrap{flex:1;overflow:hidden;position:relative;background:repeating-conic-gradient(#d8e4f0 0% 25%,#e8f0fb 0% 50%) 0 0/16px 16px;}
+  #stitch-canvas{position:absolute;top:0;left:0;cursor:grab;}
+  #stitch-canvas.grabbing{cursor:grabbing;}
+  .placeholder-msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#aabbd0;font-size:.9rem;text-align:center;padding:20px;}
+</style>
+</head>
+<body>
+<header>
+  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.75)" stroke-width="1.5">
+    <path d="M4 12c2-4 6-4 8 0s6 4 8 0" stroke-linecap="round"/>
+  </svg>
+  <div><h1>刺しゅうデータ変換</h1><p>色分解済み画像 → .pes 針落ちプレビュー＆トリム数</p></div>
+</header>
+<div class="app-body">
+  <div class="sidebar">
+    <div class="panel">
+      <h2>画像アップロード</h2>
+      <div class="drop-zone" id="drop-zone">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#5a7898" stroke-width="1.5"><path d="M12 16V4M12 4l-4 4M12 4l4 4M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <p>色分解済みPNGをドロップ<br>またはクリックして選択</p>
+        <input type="file" id="file-input" accept="image/png,image/*">
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>設定</h2>
+      <div class="field">
+        <label class="field-label">刺しゅう枠サイズ (mm・正方形)</label>
+        <input type="number" id="hoop-mm" value="100" min="10" max="400" step="1">
+      </div>
+      <button class="btn-process" id="btn-generate" disabled>刺しゅうデータを生成</button>
+      <div id="status-msg"></div>
+    </div>
+
+    <div class="panel" id="stats-panel" style="display:none;">
+      <h2>統計</h2>
+      <div class="stat-grid">
+        <div class="stat-box"><div class="val" id="stat-parts">-</div><div class="label">パーツ数</div></div>
+        <div class="stat-box"><div class="val" id="stat-trims">-</div><div class="label">トリム数</div></div>
+        <div class="stat-box"><div class="val" id="stat-colorchanges">-</div><div class="label">色替え回数</div></div>
+        <div class="stat-box"><div class="val" id="stat-stitches">-</div><div class="label">総針数</div></div>
+      </div>
+    </div>
+
+    <div class="panel" id="threads-panel" style="display:none;">
+      <h2>使用糸色（実機スナップ後）</h2>
+      <div class="thread-list" id="thread-list"></div>
+    </div>
+
+    <div class="panel" id="download-panel" style="display:none;">
+      <h2>ダウンロード</h2>
+      <button class="btn-save" id="btn-download">.pes をダウンロード</button>
+    </div>
+  </div>
+
+  <div class="canvas-area">
+    <div class="canvas-toolbar">
+      <button class="ctrl-btn" id="zoom-out">－</button>
+      <span id="zoom-display">100%</span>
+      <button class="ctrl-btn" id="zoom-in">＋</button>
+      <button class="ctrl-btn" id="zoom-reset">リセット</button>
+      <div class="toolbar-sep"></div>
+      <span style="font-size:.75rem;color:var(--muted);">ドラッグで移動・ホイールでズーム</span>
+    </div>
+    <div class="canvas-wrap" id="canvas-wrap">
+      <canvas id="stitch-canvas"></canvas>
+      <div class="placeholder-msg" id="placeholder-msg">画像をアップロードして「刺しゅうデータを生成」を押してください</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+const btnGenerate = document.getElementById('btn-generate');
+const statusMsg = document.getElementById('status-msg');
+const hoopInput = document.getElementById('hoop-mm');
+const canvas = document.getElementById('stitch-canvas');
+const canvasWrap = document.getElementById('canvas-wrap');
+const placeholderMsg = document.getElementById('placeholder-msg');
+const ctx = canvas.getContext('2d');
+
+let selectedFile = null;
+let currentResult = null; // {stats, threads, strokes, hoop_mm, token}
+let view = { scale: 4, offsetX: 0, offsetY: 0 }; // px per mm, pan offset in canvas px
+
+function setStatus(text, isError) {
+  statusMsg.textContent = text || '';
+  statusMsg.className = isError ? 'error' : '';
+}
+
+function handleFile(file) {
+  if (!file) return;
+  selectedFile = file;
+  btnGenerate.disabled = false;
+  setStatus(file.name + ' を選択しました');
+}
+
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
+['dragover', 'dragenter'].forEach(ev => dropZone.addEventListener(ev, (e) => {
+  e.preventDefault(); dropZone.classList.add('drag-over');
+}));
+['dragleave', 'drop'].forEach(ev => dropZone.addEventListener(ev, (e) => {
+  e.preventDefault(); dropZone.classList.remove('drag-over');
+}));
+dropZone.addEventListener('drop', (e) => {
+  const file = e.dataTransfer.files[0];
+  if (file) handleFile(file);
+});
+
+btnGenerate.addEventListener('click', async () => {
+  if (!selectedFile) return;
+  btnGenerate.disabled = true;
+  setStatus('生成中...');
+  document.getElementById('stats-panel').style.display = 'none';
+  document.getElementById('threads-panel').style.display = 'none';
+  document.getElementById('download-panel').style.display = 'none';
+
+  const formData = new FormData();
+  formData.append('image', selectedFile);
+  formData.append('hoop_mm', hoopInput.value);
+
+  try {
+    const res = await fetch('/api/generate', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!res.ok) {
+      setStatus(data.error || '生成に失敗しました', true);
+      btnGenerate.disabled = false;
+      return;
+    }
+    currentResult = data;
+    renderResult(data);
+    setStatus('生成完了');
+  } catch (err) {
+    setStatus('通信エラー: ' + err.message, true);
+  }
+  btnGenerate.disabled = false;
+});
+
+function renderResult(data) {
+  document.getElementById('stat-parts').textContent = data.stats.parts;
+  document.getElementById('stat-trims').textContent = data.stats.trims;
+  document.getElementById('stat-colorchanges').textContent = data.stats.color_changes;
+  document.getElementById('stat-stitches').textContent = data.stats.stitches;
+  document.getElementById('stats-panel').style.display = 'block';
+
+  const threadList = document.getElementById('thread-list');
+  threadList.innerHTML = '';
+  data.threads.forEach((t, i) => {
+    const el = document.createElement('div');
+    el.className = 'thread-swatch';
+    el.innerHTML = `<span class="dot" style="background:${t.hex}"></span><span>${i + 1}. ${t.name || t.hex}</span>`;
+    threadList.appendChild(el);
+  });
+  document.getElementById('threads-panel').style.display = 'block';
+  document.getElementById('download-panel').style.display = 'block';
+
+  placeholderMsg.style.display = 'none';
+  resetView();
+  draw();
+}
+
+document.getElementById('btn-download').addEventListener('click', () => {
+  if (!currentResult) return;
+  window.location.href = '/api/download/' + currentResult.token;
+});
+
+function resizeCanvas() {
+  const rect = canvasWrap.getBoundingClientRect();
+  canvas.width = rect.width;
+  canvas.height = rect.height;
+}
+window.addEventListener('resize', () => { resizeCanvas(); draw(); });
+
+function resetView() {
+  resizeCanvas();
+  const hoop = currentResult ? currentResult.hoop_mm : 100;
+  const margin = 40;
+  const scale = Math.min(
+    (canvas.width - margin * 2) / hoop,
+    (canvas.height - margin * 2) / hoop
+  );
+  view.scale = scale;
+  view.offsetX = canvas.width / 2;
+  view.offsetY = canvas.height / 2;
+  updateZoomDisplay();
+}
+
+function updateZoomDisplay() {
+  const basePct = currentResult ? (view.scale / (Math.min(canvas.width, canvas.height) / currentResult.hoop_mm)) : 1;
+  document.getElementById('zoom-display').textContent = Math.round(basePct * 100) + '%';
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!currentResult) return;
+
+  ctx.save();
+  ctx.translate(view.offsetX, view.offsetY);
+  ctx.scale(view.scale, view.scale);
+
+  // hoop outline
+  const half = currentResult.hoop_mm / 2;
+  ctx.strokeStyle = '#8a9fc0';
+  ctx.lineWidth = 1 / view.scale;
+  ctx.setLineDash([2 / view.scale, 2 / view.scale]);
+  ctx.strokeRect(-half, -half, currentResult.hoop_mm, currentResult.hoop_mm);
+  ctx.setLineDash([]);
+
+  currentResult.strokes.forEach(stroke => {
+    const t = currentResult.threads[stroke.thread] || { hex: '#333' };
+    ctx.strokeStyle = t.hex;
+    ctx.lineWidth = Math.max(0.15, 0.25);
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    stroke.points.forEach((p, i) => {
+      if (i === 0) ctx.moveTo(p[0], p[1]);
+      else ctx.lineTo(p[0], p[1]);
+    });
+    ctx.stroke();
+  });
+
+  ctx.restore();
+}
+
+// pan
+let isDragging = false, dragStartX = 0, dragStartY = 0, panStartX = 0, panStartY = 0;
+canvas.addEventListener('mousedown', (e) => {
+  isDragging = true;
+  canvas.classList.add('grabbing');
+  dragStartX = e.clientX; dragStartY = e.clientY;
+  panStartX = view.offsetX; panStartY = view.offsetY;
+});
+window.addEventListener('mousemove', (e) => {
+  if (!isDragging) return;
+  view.offsetX = panStartX + (e.clientX - dragStartX);
+  view.offsetY = panStartY + (e.clientY - dragStartY);
+  draw();
+});
+window.addEventListener('mouseup', () => {
+  isDragging = false;
+  canvas.classList.remove('grabbing');
+});
+
+// zoom
+function zoomBy(factor, cx, cy) {
+  const rect = canvas.getBoundingClientRect();
+  const px = cx !== undefined ? cx - rect.left : canvas.width / 2;
+  const py = cy !== undefined ? cy - rect.top : canvas.height / 2;
+  const worldX = (px - view.offsetX) / view.scale;
+  const worldY = (py - view.offsetY) / view.scale;
+  view.scale *= factor;
+  view.offsetX = px - worldX * view.scale;
+  view.offsetY = py - worldY * view.scale;
+  updateZoomDisplay();
+  draw();
+}
+document.getElementById('zoom-in').addEventListener('click', () => zoomBy(1.25));
+document.getElementById('zoom-out').addEventListener('click', () => zoomBy(0.8));
+document.getElementById('zoom-reset').addEventListener('click', () => { resetView(); draw(); });
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  zoomBy(e.deltaY < 0 ? 1.1 : 0.9, e.clientX, e.clientY);
+}, { passive: false });
+
+resizeCanvas();
+</script>
+</body>
+</html>
